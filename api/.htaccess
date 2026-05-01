@@ -1,0 +1,14 @@
+# Allow cross-origin access from the frontend (same domain on InfinityFree)
+# and serve PHP files normally.
+<IfModule mod_headers.c>
+    Header set Access-Control-Allow-Origin "*"
+</IfModule>
+
+# Deny direct directory listing
+Options -Indexes
+
+# Only allow PHP files to be executed
+<FilesMatch "\.(php)$">
+    Order allow,deny
+    Allow from all
+</FilesMatch>

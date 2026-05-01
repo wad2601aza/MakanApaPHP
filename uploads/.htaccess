@@ -1,0 +1,13 @@
+# Allow images and videos to be served from this directory
+Options -Indexes
+
+<FilesMatch "\.(jpg|jpeg|png|gif|webp|mp4|webm|ogg)$">
+    Order allow,deny
+    Allow from all
+</FilesMatch>
+
+# Prevent PHP execution inside uploads (security measure)
+<FilesMatch "\.php$">
+    Order deny,allow
+    Deny from all
+</FilesMatch>
