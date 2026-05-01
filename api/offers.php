@@ -7,13 +7,14 @@
 require_once __DIR__ . '/helpers.php';
 setCorsHeaders();
 
-$db     = getDB();
+$db = getDB();
 $method = $_SERVER['REQUEST_METHOD'];
 
 // ── GET ──────────────────────────────────────────────────────
 if ($method === 'GET') {
     $requestId = (int) ($_GET['request_id'] ?? 0);
-    if ($requestId <= 0) fail('Missing request_id.');
+    if ($requestId <= 0)
+        fail('Missing request_id.');
 
     $stmt = $db->prepare(
         'SELECT * FROM offers WHERE request_id = ? ORDER BY price ASC'
@@ -25,26 +26,30 @@ if ($method === 'GET') {
 // ── POST (multipart/form-data) ───────────────────────────────
 if ($method === 'POST') {
     // Fields come from $_POST (not JSON) because we have a file upload
-    $requestId   = (int)   ($_POST['request_id']   ?? 0);
-    $sellerName  = trim($_POST['seller_name']  ?? '');
-    $foodName    = trim($_POST['food_name']    ?? '');
-    $price       = (int)   ($_POST['price']       ?? 0);
-    $contact     = trim($_POST['contact']     ?? '');
-    $stock       = (int)   ($_POST['stock']       ?? 1);
-    $weightVol   = isset($_POST['weight_volume']) && $_POST['weight_volume'] !== ''
-                    ? (int) $_POST['weight_volume'] : null;
-    $unit        = trim($_POST['unit'] ?? '') ?: null;
+    $requestId = (int) ($_POST['request_id'] ?? 0);
+    $sellerName = trim($_POST['seller_name'] ?? '');
+    $foodName = trim($_POST['food_name'] ?? '');
+    $price = (int) ($_POST['price'] ?? 0);
+    $contact = trim($_POST['contact'] ?? '');
+    $stock = (int) ($_POST['stock'] ?? 1);
+    $weightVol = isset($_POST['weight_volume']) && $_POST['weight_volume'] !== ''
+        ? (int) $_POST['weight_volume'] : null;
+    $unit = trim($_POST['unit'] ?? '') ?: null;
 
-    if ($requestId  <= 0) fail('request_id is required.');
-    if ($sellerName === '') fail('seller_name is required.');
-    if ($foodName   === '') fail('food_name is required.');
-    if ($price      <= 0)  fail('price must be > 0.');
+    if ($requestId <= 0)
+        fail('request_id is required.');
+    if ($sellerName === '')
+        fail('seller_name is required.');
+    if ($foodName === '')
+        fail('food_name is required.');
+    if ($price <= 0)
+        fail('price must be > 0.');
 
     // ── Media upload ──────────────────────────────────────────
     $mediaUrl = null;
 
     if (!empty($_FILES['media']) && $_FILES['media']['error'] === UPLOAD_ERR_OK) {
-        $file     = $_FILES['media'];
+        $file = $_FILES['media'];
         $mimeType = mime_content_type($file['tmp_name']);
 
         if (!in_array($mimeType, ALLOWED_MIME, true)) {
@@ -59,7 +64,7 @@ if ($method === 'POST') {
             mkdir(UPLOAD_DIR, 0755, true);
         }
 
-        $ext      = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+        $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
         $fileName = time() . '_' . bin2hex(random_bytes(6)) . '.' . $ext;
         $destPath = UPLOAD_DIR . $fileName;
 
@@ -76,8 +81,15 @@ if ($method === 'POST') {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
     $stmt->execute([
-        $requestId, $sellerName, $foodName, $price,
-        $contact, $stock, $mediaUrl, $weightVol, $unit
+        $requestId,
+        $sellerName,
+        $foodName,
+        $price,
+        $contact,
+        $stock,
+        $mediaUrl,
+        $weightVol,
+        $unit
     ]);
     $newId = (int) $db->lastInsertId();
 
