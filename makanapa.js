@@ -139,8 +139,67 @@ let currentOrderContext = {}; // seller/food/price/contact/stock for submitOrder
 const chatArea = document.getElementById('chat-area');
 const userInput = document.getElementById('user-input');
 
+/* ── SOUND SYSTEM ── */
+const SFX = {
+    click: 'data:audio/mp3;base64,//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq', // placeholder for click
+    success: 'data:audio/mp3;base64,//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq',
+    error: 'data:audio/mp3;base64,//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq',
+    notify: 'data:audio/mp3;base64,//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq'
+};
+
+function playSound(type) {
+    try {
+        if (!SFX[type]) type = 'click';
+        // A very simple procedural beep generation to avoid giant base64 strings and ensure it actually works
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const oscillator = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+        oscillator.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+
+        if (type === 'click') {
+            oscillator.type = 'sine';
+            oscillator.frequency.setValueAtTime(600, audioCtx.currentTime);
+            oscillator.frequency.exponentialRampToValueAtTime(800, audioCtx.currentTime + 0.05);
+            gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.05);
+            oscillator.start();
+            oscillator.stop(audioCtx.currentTime + 0.05);
+        } else if (type === 'success') {
+            oscillator.type = 'sine';
+            oscillator.frequency.setValueAtTime(523.25, audioCtx.currentTime); // C5
+            oscillator.frequency.setValueAtTime(659.25, audioCtx.currentTime + 0.1); // E5
+            gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+            oscillator.start();
+            oscillator.stop(audioCtx.currentTime + 0.3);
+        } else if (type === 'error') {
+            oscillator.type = 'sawtooth';
+            oscillator.frequency.setValueAtTime(200, audioCtx.currentTime);
+            oscillator.frequency.exponentialRampToValueAtTime(150, audioCtx.currentTime + 0.2);
+            gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+            oscillator.start();
+            oscillator.stop(audioCtx.currentTime + 0.2);
+        } else {
+            oscillator.type = 'sine';
+            oscillator.frequency.setValueAtTime(800, audioCtx.currentTime);
+            gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+            oscillator.start();
+            oscillator.stop(audioCtx.currentTime + 0.2);
+        }
+    } catch (e) {
+        console.warn('AudioContext not supported or blocked', e);
+    }
+}
+
 /* ── TOAST SYSTEM ── */
 function showToast(title, message, type = 'default', duration = 4500) {
+    if (type === 'success') playSound('success');
+    else if (type === 'error') playSound('error');
+    else playSound('notify');
+
     const container = document.getElementById('toast-container');
     if (!container) return;
     const icons = { default: '🔔', success: '✅', error: '❌', buyer: '🛵', seller: '📦' };
@@ -700,12 +759,17 @@ async function loadSellerRequests() {
                             placeholder="Ex: Nasi Goreng Special" 
                             oninput="window.handleAutoPrice(${req.id})"
                             ${disableAttr}
-                            class="w-2/3 p-2 rounded border outline-none focus:border-blue-500 ${opacityCls}">
+                            class="w-1/2 p-2 rounded border outline-none focus:border-blue-500 ${opacityCls}">
                         
+                        <select id="offer-lazy-${req.id}" onchange="applyLazySelect(${req.id})" class="w-1/4 p-2 rounded border outline-none focus:border-blue-500 text-xs bg-white ${opacityCls}" ${disableAttr}>
+                            <option value="">Drafts...</option>
+                            ${(window.sellerMenuDrafts || []).map(d => `<option value="${d.id}">${d.food_name}</option>`).join('')}
+                        </select>
+
                         <input type="text" id="offer-size-${req.id}" 
                             placeholder="Size/Notes" 
                             ${disableAttr}
-                            class="w-1/3 p-2 rounded border outline-none focus:border-blue-500 bg-white ${opacityCls}">
+                            class="w-1/4 p-2 rounded border outline-none focus:border-blue-500 bg-white ${opacityCls}">
                     </div>
                     
                     <div class="flex gap-2 mb-2">
@@ -744,6 +808,7 @@ async function loadSellerRequests() {
 }
 
 async function submitOffer(reqId) {
+    playSound('click');
     if (!checkProfile()) return;
 
     // 1. Ambil input yang MEMANG diketik seller (Menu & Harga)
@@ -1269,7 +1334,10 @@ function closeTopupModal() {
 document.addEventListener('DOMContentLoaded', async () => {
     updateGatekeeperUI();
     const phone = (typeof isSellerPage !== 'undefined' && isSellerPage) ? localStorage.getItem('seller_phone') : localStorage.getItem('buyer_phone');
-    if (phone) await fetchUserProfile();
+    if (phone) {
+        await fetchUserProfile();
+        if (isSellerPage) loadMenuDraftsUI();
+    }
 
     // Removed initOrderRealtime()
 
@@ -1325,3 +1393,192 @@ window.openSellerHistory = openSellerHistory;
 window.closeSellerHistory = closeSellerHistory;
 window.updateOrderStatus = updateOrderStatus;
 window.showToast = showToast;
+
+/* ── MY MENU DRAFTS LOGIC ── */
+window.sellerMenuDrafts = [];
+
+window.openMenuDraftsModal = function() {
+    playSound('click');
+    const modal = document.getElementById('menu-drafts-modal');
+    if (modal) {
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+    }
+    loadMenuDraftsUI();
+};
+
+window.closeMenuDraftsModal = function() {
+    playSound('click');
+    const modal = document.getElementById('menu-drafts-modal');
+    if (modal) {
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+    }
+};
+
+window.loadMenuDraftsUI = async function() {
+    const phone = localStorage.getItem('seller_phone');
+    if (!phone) return;
+    try {
+        const drafts = await API.getMenuDrafts(phone);
+        window.sellerMenuDrafts = drafts;
+        const listEl = document.getElementById('drafts-list');
+        if (!listEl) return;
+        
+        listEl.innerHTML = '';
+        if (drafts.length === 0) {
+            listEl.innerHTML = '<div class="text-center text-gray-400 text-sm py-4 italic">No drafts yet. Add some below!</div>';
+        } else {
+            drafts.forEach(d => {
+                const el = document.createElement('div');
+                el.className = 'flex justify-between items-center p-3 bg-white border border-gray-100 rounded-xl shadow-sm mb-2';
+                el.innerHTML = `
+                    <div>
+                        <div class="font-bold text-sm text-gray-800">${d.food_name}</div>
+                        <div class="text-xs text-teal-600 font-semibold">Rp ${parseInt(d.price).toLocaleString('id-ID')}</div>
+                    </div>
+                    <button onclick="deleteMenuDraftUI(${d.id})" class="text-red-400 hover:text-red-600 w-8 h-8 rounded-full bg-red-50 flex items-center justify-center transition-colors">
+                        <i class="fa-solid fa-trash text-xs"></i>
+                    </button>
+                `;
+                listEl.appendChild(el);
+            });
+        }
+        // Update any active seller requests dropdowns
+        if (typeof loadSellerRequests === 'function') loadSellerRequests();
+    } catch (e) {
+        console.error('Failed to load drafts', e);
+    }
+};
+
+window.saveMenuDraftUI = async function() {
+    playSound('click');
+    const phone = localStorage.getItem('seller_phone');
+    if (!phone) return alert('Please set up your profile first.');
+    const foodInput = document.getElementById('draft-food-name');
+    const priceInput = document.getElementById('draft-price');
+    const foodName = foodInput.value.trim();
+    const price = parseInt(priceInput.value);
+    
+    if (!foodName || isNaN(price)) return alert('Please enter valid name and price.');
+    
+    try {
+        await API.saveMenuDraft(phone, foodName, price);
+        foodInput.value = '';
+        priceInput.value = '';
+        showToast('Draft Saved!', `Added ${foodName}`, 'success', 3000);
+        loadMenuDraftsUI();
+    } catch (e) {
+        showToast('Error', e.message, 'error');
+    }
+};
+
+window.deleteMenuDraftUI = async function(id) {
+    playSound('click');
+    if (!confirm('Delete this draft?')) return;
+    try {
+        await API.deleteMenuDraft(id);
+        showToast('Draft Deleted', '', 'notify', 2000);
+        loadMenuDraftsUI();
+    } catch (e) {
+        showToast('Error', e.message, 'error');
+    }
+};
+
+window.applyLazySelect = function(reqId) {
+    const select = document.getElementById(`offer-lazy-${reqId}`);
+    if (!select || !select.value) return;
+    playSound('click');
+    const draftId = parseInt(select.value);
+    const draft = window.sellerMenuDrafts.find(d => parseInt(d.id) === draftId);
+    if (draft) {
+        const nameInput = document.getElementById(`offer-name-${reqId}`);
+        const priceInput = document.getElementById(`offer-price-${reqId}`);
+        if (nameInput) nameInput.value = draft.food_name;
+        if (priceInput) priceInput.value = draft.price;
+        showToast('Auto-filled!', `${draft.food_name} applied.`, 'success', 2000);
+        // Highlight inputs
+        [nameInput, priceInput].forEach(el => {
+            if (!el) return;
+            const oldBg = el.style.backgroundColor;
+            el.style.backgroundColor = '#e8f5e9';
+            el.style.borderColor = '#4ade80';
+            setTimeout(() => {
+                el.style.backgroundColor = oldBg;
+                el.style.borderColor = '';
+            }, 500);
+        });
+    }
+    select.value = ''; // Reset select
+};
+
+window.handlePhysicalMenuUpload = async function(event) {
+    playSound('click');
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    const phone = localStorage.getItem('seller_phone');
+    if (!phone) return alert('Set profile first!');
+
+    const statusEl = document.getElementById('ai-upload-status');
+    statusEl.classList.remove('hidden');
+    
+    try {
+        const result = await Tesseract.recognize(file, 'eng', {
+            logger: m => {
+                if (m.status === 'recognizing text') {
+                    statusEl.innerText = `Extracting: ${Math.round(m.progress * 100)}% ⏳`;
+                }
+            }
+        });
+        
+        const text = result.data.text;
+        statusEl.innerText = 'Parsing AI results...';
+        
+        const lines = text.split('\n').filter(l => l.trim().length > 3);
+        let addedCount = 0;
+
+        const cleanText = text.replace(/Rp\.?/gi, '').replace(/[\r\n]+/g, '  ');
+
+        // Global regex to find multiple "Food Name Price" pairs anywhere in the text
+        const regex = /([A-Za-z][A-Za-z0-9\s\-\&]+?)[\s\.\:\-]*?([\d.,]+)\s*([kK]?)(?=\s*[A-Za-z]|$)/g;
+        let match;
+
+        while ((match = regex.exec(cleanText)) !== null) {
+            let name = match[1].trim();
+            let numStr = match[2].replace(/[.,]/g, '');
+            let hasK = match[3].toLowerCase() === 'k';
+            let price = parseInt(numStr);
+            
+            if (isNaN(price)) continue;
+            
+            // Smart parsing:
+            if (hasK) price *= 1000;
+            else if (price > 0 && price <= 200) price *= 1000;
+            
+            // Clean up name
+            name = name.replace(/^[^\w]+|[^\w]+$/g, '');
+            
+            if (name.length > 2 && price >= 500) {
+                await API.saveMenuDraft(phone, name, price);
+                addedCount++;
+            }
+        }
+        
+        statusEl.classList.add('hidden');
+        if (addedCount > 0) {
+            showToast('AI Vision Success ✨', `Imported ${addedCount} menu items!`, 'success');
+            loadMenuDraftsUI();
+        } else {
+            showToast('AI Vision Failed', 'No clear prices found in the image.', 'error');
+        }
+        
+    } catch (e) {
+        console.error('Tesseract Error:', e);
+        statusEl.classList.add('hidden');
+        showToast('AI Error', 'Failed to extract text.', 'error');
+    }
+    
+    // Reset file input
+    event.target.value = '';
+};

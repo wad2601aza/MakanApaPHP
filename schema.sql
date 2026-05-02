@@ -111,3 +111,12 @@ CREATE TABLE IF NOT EXISTS `balance_history` (
   CONSTRAINT `fk_bhistory_user`
     FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE seller_menus (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    seller_phone VARCHAR(50) NOT NULL,
+    food_name VARCHAR(255) NOT NULL,
+    price INTEGER NOT NULL,
+    media_url TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);

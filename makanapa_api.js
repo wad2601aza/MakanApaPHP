@@ -113,6 +113,29 @@ const API = {
         return r.data;
     },
 
+    // ── Seller Menus ─────────────────────────────────────────
+    async getMenuDrafts(sellerPhone) {
+        const r = await apiGet('seller_menus.php', { seller_phone: sellerPhone });
+        return r.success ? r.data : [];
+    },
+
+    async saveMenuDraft(sellerPhone, foodName, price, mediaUrl = '') {
+        const r = await apiPost('seller_menus.php', { seller_phone: sellerPhone, food_name: foodName, price, media_url: mediaUrl });
+        if (!r.success) throw new Error(r.error);
+        return r.data;
+    },
+
+    async deleteMenuDraft(id) {
+        const res = await fetch(`${API_BASE}/seller_menus.php`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ id })
+        });
+        const r = await res.json();
+        if (!r.success) throw new Error(r.error);
+        return r.data;
+    },
+
     // ── Habits ───────────────────────────────────────────────
     async getHabits(userId) {
         const r = await apiGet('habits.php', { user_id: userId });
