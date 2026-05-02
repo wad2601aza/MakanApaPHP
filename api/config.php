@@ -1,25 +1,18 @@
 <?php
-// ============================================================
-// MakanApa — Central Configuration File
-// Fill in YOUR InfinityFree credentials below before uploading.
-// ============================================================
 
-// ── DATABASE ────────────────────────────────────────────────
-// Find your DB host in InfinityFree Control Panel → MySQL Databases
-// It will look like: sql123.infinityfreeapp.com
-define('DB_HOST', 'sql123.infinityfreeapp.com'); // ← CHANGE THIS
+define('DB_HOST', 'sql102.infinityfree.com'); // ← CHANGE THIS
 
 // Standard MySQL port on InfinityFree (do NOT use 3307 — that's only for local XAMPP)
 define('DB_PORT', '3306');
 
 // Your InfinityFree database name. Format: epiz_XXXXXXX_makanapa
-define('DB_NAME', 'epiz_XXXXXXX_makanapa'); // ← CHANGE THIS
+define('DB_NAME', 'if0_41704967_makanapa'); // ← CHANGE THIS
 
 // Your InfinityFree database username. Format: epiz_XXXXXXX
-define('DB_USER', 'epiz_XXXXXXX');           // ← CHANGE THIS
+define('DB_USER', 'if0_41704967');           // ← CHANGE THIS
 
 // The password you set when creating the database
-define('DB_PASS', 'your_password_here');     // ← CHANGE THIS
+define('DB_PASS', 'qZ3wa91umH1T');     // ← CHANGE THIS
 
 // ── APP ─────────────────────────────────────────────────────
 // Your InfinityFree subdomain or custom domain (no trailing slash)

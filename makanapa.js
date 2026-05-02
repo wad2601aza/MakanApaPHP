@@ -304,8 +304,14 @@ async function fetchUserProfile() {
     const name  = isSellerPage ? localStorage.getItem('seller_name')  : localStorage.getItem('buyer_name');
     if (!phone) return;
     try {
-        // find-or-create via PHP API
+        // find-or-create via PHP API (acts as save_profile.php)
         currentDbUser = await API.upsertUser(phone, name || phone);
+        
+        // Save the ID explicitly to localStorage as requested
+        if (currentDbUser && currentDbUser.id) {
+            localStorage.setItem('user_id', currentDbUser.id);
+        }
+        
         loadBalance();
         loadUserHabit();
         renderHabits();
@@ -323,15 +329,27 @@ async function submitTopup() {
     if (isNaN(amount) || amount <= 0) { alert('Hey, input a valid top-up amount!'); return; }
     try {
         await fetchUserProfile();
-        if (!currentDbUser) { alert('Profile not found. Set up your name and phone first!'); return; }
-        const result = await API.topup(currentDbUser.id, amount);
-        currentDbUser.balance = result.new_balance;
+        
+        // Try getting ID from state, or from localStorage fallback
+        const userId = currentDbUser?.id || localStorage.getItem('user_id');
+        const phone = isSellerPage ? localStorage.getItem('seller_phone') : localStorage.getItem('buyer_phone');
+        
+        if (!userId && !phone) { 
+            alert('Profile not found. Set up your name and phone first!'); 
+            return; 
+        }
+
+        // Send topup request using either user_id or phone as fallback
+        const result = await API.topup(userId, amount, phone);
+        
+        if (currentDbUser) currentDbUser.balance = result.new_balance;
+        
         // Save top-up in localStorage for history display
-        const phone = localStorage.getItem('buyer_phone') || '';
-        const topupKey = `topup_history_${phone}`;
+        const topupKey = `topup_history_${phone || ''}`;
         const topups = JSON.parse(localStorage.getItem(topupKey) || '[]');
         topups.push({ amount, date: Date.now() });
         localStorage.setItem(topupKey, JSON.stringify(topups));
+        
         alert('Top up success! Balance: Rp ' + result.new_balance.toLocaleString('id-ID'));
         if (typeof closeTopupModal === 'function') closeTopupModal();
         loadBalance();
@@ -1220,72 +1238,21 @@ async function loadSellerHistory() {
 }
 
 async function updateOrderStatus(orderId, newStatus) {
-    const { error } = await supabaseClient.from('orders').update({ status: newStatus }).eq('id', orderId);
-    if (!error) {
+    try {
+        await API.updateOrderStatus(orderId, newStatus);
         const msgs = {
-            'on process': ['Cooking time! 🍳', 'Order marked as On Process. The buyer knows you’re on it.'],
+            'on process': ['Cooking time! 🍳', "Order marked as On Process. The buyer knows you're on it."],
             'delivered': ['Delivered! 🚀', 'Nice work! Order is marked as delivered. Time to get paid.']
         };
         const [title, msg] = msgs[newStatus] || ['Updated!', `Status set to ${newStatus}.`];
         showToast(title, msg, 'success', 5000);
         loadSellerHistory();
-    } else {
-        showToast('Update failed 😕', error.message, 'error');
+    } catch (err) {
+        showToast('Update failed 😕', err.message, 'error');
     }
 }
 
-/* ── SUPABASE REALTIME: Listen for order updates ── */
-function initOrderRealtime() {
-    const isSeller = typeof isSellerPage !== 'undefined' && isSellerPage;
-    const sellerName = localStorage.getItem('seller_name');
-    const buyerPhone = localStorage.getItem('buyer_phone');
-    const storedBuyerName = localStorage.getItem('buyer_name');
-
-    if (!sellerName && !buyerPhone) return;
-
-    supabaseClient
-        .channel('order-updates')
-        .on('postgres_changes',
-            { event: '*', schema: 'public', table: 'orders' },
-            (payload) => {
-                const o = payload.new || payload.old;
-
-                // Seller-side events
-                if (isSeller && o.seller_name === sellerName) {
-                    if (payload.eventType === 'INSERT') {
-                        incrementSellerNotif();
-                        showToast(
-                            '🛵 New Order Coming In!',
-                            `${o.food_name} ×${o.quantity} — ${o.buyer_name} just placed an order. Go get it!`,
-                            'seller',
-                            9000
-                        );
-                        if (document.getElementById('history-list')) loadSellerHistory();
-                    } else if (payload.eventType === 'UPDATE') {
-                        if (o.status === 'cancelled') {
-                            showToast('Order Cancelled 🚫', `${o.buyer_name} cancelled their order.`, 'error', 5000);
-                        }
-                        if (document.getElementById('history-list')) loadSellerHistory();
-                    }
-                }
-                // Buyer-side events
-                else if (!isSeller && (o.buyer_phone === buyerPhone || o.buyer_name === storedBuyerName)) {
-                    if (payload.eventType === 'UPDATE') {
-                        if (o.status === 'on process') {
-                            showToast('Cooking time! 🍳', `${o.seller_name} is preparing your ${o.food_name}.`, 'buyer', 5000);
-                        } else if (o.status === 'delivered') {
-                            showToast('Delivered! 🚀', `Your ${o.food_name} has arrived!`, 'success', 5000);
-                        } else if (o.status === 'cancelled') {
-                            showToast('Order Rejected 🚫', `${o.seller_name} rejected your order. Money refunded.`, 'error', 5000);
-                            loadBalance(); // Refresh balance in header
-                        }
-                        if (document.getElementById('history-list')) loadOrderHistory();
-                    }
-                }
-            }
-        )
-        .subscribe();
-}
+/* ── SUPABASE REMOVED: Replaced by PHP Polling ── */
 
 function openTopupModal() {
     const modal = document.getElementById("topup-modal");
@@ -1304,7 +1271,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const phone = (typeof isSellerPage !== 'undefined' && isSellerPage) ? localStorage.getItem('seller_phone') : localStorage.getItem('buyer_phone');
     if (phone) await fetchUserProfile();
 
-    initOrderRealtime();
+    // Removed initOrderRealtime()
 
     const UserInput = document.getElementById('user-input');
     const sendBtn = document.getElementById('send-btn');

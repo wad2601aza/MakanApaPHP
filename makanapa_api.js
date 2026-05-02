@@ -4,14 +4,20 @@
 // Change API_BASE to match your InfinityFree domain.
 // ============================================================
 
-const API_BASE = 'https://yourdomain.infinityfreeapp.com/api';
-// ↑ CHANGE THIS to your InfinityFree URL before deploying
+const API_BASE = window.location.origin.includes('localhost') 
+    ? 'http://localhost/makanapaPHP2/api' 
+    : window.location.origin + '/api';
+
 
 // ── Generic helpers ─────────────────────────────────────────
 async function apiGet(endpoint, params = {}) {
     const url = new URL(`${API_BASE}/${endpoint}`);
     Object.entries(params).forEach(([k, v]) => { if (v !== null && v !== undefined && v !== '') url.searchParams.set(k, v); });
-    const res = await fetch(url.toString());
+    const res = await fetch(url.toString(), {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+        credentials: 'same-origin'
+    });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.json();
 }
@@ -19,7 +25,11 @@ async function apiGet(endpoint, params = {}) {
 async function apiPost(endpoint, body = {}) {
     const res = await fetch(`${API_BASE}/${endpoint}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+        },
+        credentials: 'same-origin',
         body: JSON.stringify(body)
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -41,8 +51,8 @@ const API = {
     },
 
     // ── Balance ──────────────────────────────────────────────
-    async topup(userId, amount) {
-        const r = await apiPost('topup.php', { user_id: userId, amount });
+    async topup(userId, amount, phone = '') {
+        const r = await apiPost('topup.php', { user_id: userId, amount, phone });
         if (!r.success) throw new Error(r.error);
         return r.data; // { new_balance }
     },
