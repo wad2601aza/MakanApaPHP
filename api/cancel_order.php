@@ -2,8 +2,7 @@
 // ============================================================
 // MakanApa — Cancel Order API
 // POST {order_id}
-//   → Atomically: fetch order → refund buyer balance
-//              → set status='cancelled' → restore offer stock
+//   Atomically: refund buyer balance → set cancelled → restore stock
 // ============================================================
 require_once __DIR__ . '/helpers.php';
 setCorsHeaders();
@@ -17,7 +16,7 @@ if ($orderId <= 0) fail('order_id is required.');
 
 $db->beginTransaction();
 try {
-    // 1. Fetch the order
+    // 1. Fetch order
     $stmt = $db->prepare(
         'SELECT id, user_id, buyer_phone, seller_name, food_name,
                 request_id, quantity, total, status
@@ -27,37 +26,37 @@ try {
     $order = $stmt->fetch();
 
     if (!$order) throw new RuntimeException('Order not found.');
-    if ($order['status'] !== 'pending' && $order['status'] !== null) {
+    // Fixed: only allow cancellation of pending orders
+    if ($order['status'] !== 'pending') {
         throw new RuntimeException('Only pending orders can be cancelled.');
     }
 
-    // 2. Refund buyer balance (find user by user_id or buyer_phone)
-    $userId = (int) ($order['user_id'] ?? 0);
-    $refundTotal = (int) ($order['total'] ?? 0);
+    // 2. Refund buyer balance
+    $userId      = (int) ($order['user_id'] ?? 0);
+    $refundTotal = (int) ($order['total']   ?? 0);
 
     if ($userId > 0) {
         $stmt = $db->prepare('SELECT id, balance FROM users WHERE id = ? LIMIT 1');
         $stmt->execute([$userId]);
     } else {
-        // Fallback: look up by phone
         $stmt = $db->prepare('SELECT id, balance FROM users WHERE phone = ? LIMIT 1');
         $stmt->execute([$order['buyer_phone']]);
     }
     $user = $stmt->fetch();
 
+    $refundedBalance = null;
     if ($user && $refundTotal > 0) {
         $refundedBalance = (int) $user['balance'] + $refundTotal;
         $db->prepare('UPDATE users SET balance = ? WHERE id = ?')
            ->execute([$refundedBalance, $user['id']]);
-
-        // Log refund
         $db->prepare(
             'INSERT INTO balance_history (user_id, type, amount, reference_id, description)
              VALUES (?, ?, ?, ?, ?)'
-        )->execute([$user['id'], 'refund', $refundTotal, $orderId, "Refund for cancelled order #{$orderId}"]);
+        )->execute([$user['id'], 'refund', $refundTotal, $orderId,
+                    "Refund for cancelled order #{$orderId}"]);
     }
 
-    // 3. Set order status to cancelled
+    // 3. Cancel order
     $db->prepare('UPDATE orders SET status = ? WHERE id = ?')
        ->execute(['cancelled', $orderId]);
 
@@ -69,7 +68,6 @@ try {
         );
         $stmt->execute([$order['request_id'], $order['seller_name'], $order['food_name']]);
         $offer = $stmt->fetch();
-
         if ($offer) {
             $restoredStock = (int) $offer['stock'] + (int) ($order['quantity'] ?? 1);
             $db->prepare('UPDATE offers SET stock = ? WHERE id = ?')
@@ -85,6 +83,6 @@ try {
 
 success([
     'cancelled_order_id' => $orderId,
-    'refund_amount'      => $refundTotal ?? 0,
+    'refund_amount'      => $refundTotal  ?? 0,
     'new_balance'        => $refundedBalance ?? null
 ]);

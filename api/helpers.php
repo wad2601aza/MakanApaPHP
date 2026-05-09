@@ -8,7 +8,7 @@ require_once __DIR__ . '/db_connect.php';
 function setCorsHeaders(): void {
     // Allow your InfinityFree domain. '*' is fine for public apps.
     header('Access-Control-Allow-Origin: *');
-    header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+    header('Access-Control-Allow-Methods: GET, POST, DELETE, OPTIONS');
     header('Access-Control-Allow-Headers: Content-Type, Authorization');
     header('Content-Type: application/json; charset=UTF-8');
 
@@ -20,13 +20,13 @@ function setCorsHeaders(): void {
 }
 
 // ── Response helpers ────────────────────────────────────────
-function success(mixed $data = null, int $code = 200): never {
+function success($data = null, $code = 200) {
     http_response_code($code);
     echo json_encode(['success' => true, 'data' => $data]);
     exit;
 }
 
-function fail(string $message, int $code = 400): never {
+function fail($message, $code = 400) {
     http_response_code($code);
     echo json_encode(['success' => false, 'error' => $message]);
     exit;
@@ -41,7 +41,7 @@ function getJsonBody(): array {
 }
 
 // ── Method guard ────────────────────────────────────────────
-function requireMethod(string ...$methods): void {
+function requireMethod(...$methods) {
     if (!in_array($_SERVER['REQUEST_METHOD'], $methods, true)) {
         fail('Method not allowed.', 405);
     }

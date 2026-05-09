@@ -4,8 +4,7 @@
 // GET  ?buyer_name=X              → buyer order history
 // GET  ?seller_name=X             → seller order history
 // GET  ?buyer_name=X&since=TS     → polling: only new/changed orders
-// GET  ?seller_name=X&since=TS    → polling: only new/changed orders
-// POST {…order fields…}           → place order (atomic: deduct balance + insert + decrement stock)
+// POST {…order fields…}           → place order (atomic)
 // ============================================================
 require_once __DIR__ . '/helpers.php';
 setCorsHeaders();
@@ -24,7 +23,6 @@ if ($method === 'GET') {
     }
 
     if ($buyerName !== '') {
-        // Exact match first, then phone-suffix fallback handled client-side
         if ($since !== '') {
             $stmt = $db->prepare(
                 'SELECT * FROM orders WHERE buyer_name = ? AND created_at > ?
@@ -61,13 +59,15 @@ if ($method === 'GET') {
 if ($method === 'POST') {
     $body = getJsonBody();
 
-    $userId         = isset($body['user_id'])    && $body['user_id']    ? (int) $body['user_id'] : null;
+    $userId         = isset($body['user_id'])    && $body['user_id']    ? (int) $body['user_id']    : null;
     $requestId      = isset($body['request_id']) && $body['request_id'] ? (int) $body['request_id'] : null;
-    $offerId        = isset($body['offer_id'])   && $body['offer_id']   ? (int) $body['offer_id'] : null;
+    $offerId        = isset($body['offer_id'])   && $body['offer_id']   ? (int) $body['offer_id']   : null;
+    $sellerId       = isset($body['seller_id'])  && $body['seller_id']  ? (int) $body['seller_id']  : null;
     $buyerName      = trim($body['buyer_name']    ?? '');
     $buyerPhone     = trim($body['buyer_phone']   ?? '');
     $buyerAddress   = trim($body['buyer_address'] ?? '');
     $sellerName     = trim($body['seller_name']   ?? '');
+    $sellerPhone    = trim($body['seller_phone']  ?? '');
     $foodName       = trim($body['food_name']     ?? '');
     $price          = (int) ($body['price']       ?? 0);
     $quantity       = (int) ($body['quantity']    ?? 1);
@@ -76,17 +76,18 @@ if ($method === 'POST') {
     $notes          = trim($body['notes']         ?? '');
     $locationCoords = trim($body['location_coords'] ?? '');
 
-    // Basic validation
-    if (!$userId)                     fail('user_id is required.');
-    if ($buyerName   === '')          fail('buyer_name is required.');
-    if ($buyerAddress === '')         fail('buyer_address is required.');
-    if ($sellerName  === '')          fail('seller_name is required.');
-    if ($foodName    === '')          fail('food_name is required.');
-    if ($price <= 0)                  fail('price must be > 0.');
-    if ($quantity < 1) $quantity = 1;
-    if ($total <= 0) $total = $price * $quantity;
+    if (!$userId)          fail('user_id is required.');
+    if ($buyerName  === '') fail('buyer_name is required.');
+    if ($buyerAddress === '') fail('buyer_address is required.');
+    if ($sellerName === '') fail('seller_name is required.');
+    if ($foodName   === '') fail('food_name is required.');
+    if ($price      <= 0)  fail('price must be > 0.');
+    if ($quantity   < 1)   $quantity = 1;
+    if ($total      <= 0)  $total = $price * $quantity;
 
-    // ── Atomic transaction ───────────────────────────────────
+    // Use contact as seller_phone fallback
+    if ($sellerPhone === '') $sellerPhone = $contact;
+
     $db->beginTransaction();
     try {
         // 1. Check & deduct buyer balance
@@ -96,30 +97,32 @@ if ($method === 'POST') {
         if (!$user) throw new RuntimeException('User not found.');
 
         $currentBalance = (int) $user['balance'];
-        if ($currentBalance < $total) {
-            throw new RuntimeException('Insufficient balance.');
-        }
+        if ($currentBalance < $total) throw new RuntimeException('Insufficient balance.');
         $newBalance = $currentBalance - $total;
 
         $db->prepare('UPDATE users SET balance = ? WHERE id = ?')
            ->execute([$newBalance, $userId]);
 
-        // 2. Insert order
+        // 2. Insert order — now includes seller_id, offer_id, seller_phone
         $stmt = $db->prepare(
             'INSERT INTO orders
-                (user_id, request_id, buyer_name, buyer_phone, buyer_address,
-                 seller_name, food_name, price, quantity, total,
-                 contact, status, notes, location_coords)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                (user_id, request_id, offer_id, seller_id,
+                 buyer_name, buyer_phone, buyer_address,
+                 seller_name, seller_phone, food_name,
+                 price, quantity, total, contact,
+                 status, is_rated, notes, location_coords)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $stmt->execute([
-            $userId, $requestId, $buyerName, $buyerPhone, $buyerAddress,
-            $sellerName, $foodName, $price, $quantity, $total,
-            $contact, 'pending', $notes ?: null, $locationCoords ?: null
+            $userId, $requestId, $offerId, $sellerId,
+            $buyerName, $buyerPhone, $buyerAddress,
+            $sellerName, $sellerPhone, $foodName,
+            $price, $quantity, $total, $contact,
+            'pending', 0, $notes ?: null, $locationCoords ?: null
         ]);
         $orderId = (int) $db->lastInsertId();
 
-        // 3. Decrement offer stock (if offer_id provided)
+        // 3. Decrement offer stock
         if ($offerId) {
             $stmt = $db->prepare('SELECT stock FROM offers WHERE id = ? LIMIT 1');
             $stmt->execute([$offerId]);
@@ -135,20 +138,18 @@ if ($method === 'POST') {
         $db->prepare(
             'INSERT INTO balance_history (user_id, type, amount, reference_id, description)
              VALUES (?, ?, ?, ?, ?)'
-        )->execute([$userId, 'order', -$total, $orderId, "Order #{$orderId}: {$foodName} ×{$quantity}"]);
+        )->execute([$userId, 'order', -$total, $orderId, "Order #{$orderId}: {$foodName} x{$quantity}"]);
 
         $db->commit();
     } catch (Throwable $e) {
         $db->rollBack();
-        fail($e->getMessage(), 400);
+        // Return the real DB error so you can diagnose it
+        fail('Order failed: ' . $e->getMessage(), 400);
     }
 
-    // Return the new order + updated balance
     $stmt = $db->prepare('SELECT * FROM orders WHERE id = ? LIMIT 1');
     $stmt->execute([$orderId]);
-    $order = $stmt->fetch();
-
-    success(['order' => $order, 'new_balance' => $newBalance], 201);
+    success(['order' => $stmt->fetch(), 'new_balance' => $newBalance], 201);
 }
 
 fail('Method not allowed.', 405);

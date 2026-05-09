@@ -1,18 +1,19 @@
 // ============================================================
-// MakanApa — PHP API Wrapper
+// MakanApa — PHP API Wrapper  (v4 — no Supabase)
 // All fetch() calls to the PHP backend live here.
-// Change API_BASE to match your InfinityFree domain.
+// Change API_BASE for your InfinityFree domain if needed.
 // ============================================================
 
-const API_BASE = window.location.origin.includes('localhost') 
-    ? 'http://localhost/makanapaPHP2/api' 
+const API_BASE = window.location.origin.includes('localhost')
+    ? 'http://localhost/makanapaPHP2/api'
     : window.location.origin + '/api';
-
 
 // ── Generic helpers ─────────────────────────────────────────
 async function apiGet(endpoint, params = {}) {
     const url = new URL(`${API_BASE}/${endpoint}`);
-    Object.entries(params).forEach(([k, v]) => { if (v !== null && v !== undefined && v !== '') url.searchParams.set(k, v); });
+    Object.entries(params).forEach(([k, v]) => {
+        if (v !== null && v !== undefined && v !== '') url.searchParams.set(k, v);
+    });
     const res = await fetch(url.toString(), {
         method: 'GET',
         headers: { 'Accept': 'application/json' },
@@ -25,27 +26,43 @@ async function apiGet(endpoint, params = {}) {
 async function apiPost(endpoint, body = {}) {
     const res = await fetch(`${API_BASE}/${endpoint}`, {
         method: 'POST',
-        headers: { 
+        headers: {
             'Content-Type': 'application/json',
             'Accept': 'application/json'
         },
         credentials: 'same-origin',
         body: JSON.stringify(body)
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.json();
+    // Parse the body regardless of status so we can show the real error
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+        const msg = data?.error || `HTTP ${res.status}`;
+        throw new Error(msg);
+    }
+    return data;
 }
 
-// ── Users ────────────────────────────────────────────────────
+// ── API namespace ────────────────────────────────────────────
 const API = {
 
+    // ── Users ────────────────────────────────────────────────
     async getUser(phone) {
         const r = await apiGet('users.php', { phone });
         return r.success ? r.data : null;
     },
 
-    async upsertUser(phone, name) {
-        const r = await apiPost('users.php', { phone, name });
+    /**
+     * Upsert user — also saves seller/buyer coordinates so the
+     * Haversine calculation has a shop location to work with.
+     */
+    async upsertUser(phone, name, coords = null) {
+        const payload = { phone, name };
+        if (coords) {
+            payload.latitude    = coords.lat;
+            payload.longitude   = coords.lng;
+            payload.address_name = coords.address || null;
+        }
+        const r = await apiPost('users.php', payload);
         if (!r.success) throw new Error(r.error);
         return r.data;
     },
@@ -63,8 +80,18 @@ const API = {
         return r.success ? r.data : [];
     },
 
-    async createRequest(userId, buyerName, description, quantity) {
-        const r = await apiPost('requests.php', { user_id: userId, buyer_name: buyerName, description, quantity });
+    /**
+     * createRequest — now accepts buyer coordinates so sellers
+     * can calculate distance when they post an offer.
+     */
+    async createRequest(userId, buyerName, description, quantity, notes = '', coords = null) {
+        const payload = { user_id: userId, buyer_name: buyerName, description, quantity };
+        if (notes)  payload.notes     = notes;
+        if (coords) {
+            payload.buyer_lat = coords.lat;
+            payload.buyer_lng = coords.lng;
+        }
+        const r = await apiPost('requests.php', payload);
         if (!r.success) throw new Error(r.error);
         return r.data;
     },
@@ -75,9 +102,16 @@ const API = {
         return r.success ? r.data : [];
     },
 
+    /**
+     * submitOffer — FormData (multipart) for file upload.
+     * Caller should append seller_lat / seller_lng so the PHP
+     * backend can run the Haversine calculation server-side.
+     */
     async submitOffer(formData) {
-        // formData is a FormData object (multipart, for file upload)
-        const res = await fetch(`${API_BASE}/offers.php`, { method: 'POST', body: formData });
+        const res = await fetch(`${API_BASE}/offers.php`, {
+            method: 'POST',
+            body: formData   // browser sets Content-Type: multipart/form-data automatically
+        });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const r = await res.json();
         if (!r.success) throw new Error(r.error);
@@ -113,6 +147,22 @@ const API = {
         return r.data;
     },
 
+    // ── Ratings ──────────────────────────────────────────────
+    // seller_id is optional — ratings.php will fall back to orders.seller_id
+    async submitRating(orderId, stars, comment = '', sellerId = null, buyerId = null) {
+        const payload = { order_id: orderId, stars, comment };
+        if (sellerId) payload.seller_id = sellerId;
+        if (buyerId)  payload.buyer_id  = buyerId;
+        const r = await apiPost('ratings.php', payload);
+        if (!r.success) throw new Error(r.error);
+        return r.data;
+    },
+
+    async getRatingForOrder(orderId) {
+        const r = await apiGet('ratings.php', { order_id: orderId });
+        return r.success ? r.data : null;
+    },
+
     // ── Seller Menus ─────────────────────────────────────────
     async getMenuDrafts(sellerPhone) {
         const r = await apiGet('seller_menus.php', { seller_phone: sellerPhone });
@@ -120,7 +170,9 @@ const API = {
     },
 
     async saveMenuDraft(sellerPhone, foodName, price, mediaUrl = '') {
-        const r = await apiPost('seller_menus.php', { seller_phone: sellerPhone, food_name: foodName, price, media_url: mediaUrl });
+        const r = await apiPost('seller_menus.php', {
+            seller_phone: sellerPhone, food_name: foodName, price, media_url: mediaUrl
+        });
         if (!r.success) throw new Error(r.error);
         return r.data;
     },
@@ -135,16 +187,4 @@ const API = {
         if (!r.success) throw new Error(r.error);
         return r.data;
     },
-
-    // ── Habits ───────────────────────────────────────────────
-    async getHabits(userId) {
-        const r = await apiGet('habits.php', { user_id: userId });
-        return r.success ? r.data : null;
-    },
-
-    async saveHabits(userId, lastFood, avgPrice, totalOrders, cheapestCount) {
-        const r = await apiPost('habits.php', { user_id: userId, last_food: lastFood, avg_price: avgPrice, total_orders: totalOrders, cheapest_count: cheapestCount });
-        if (!r.success) throw new Error(r.error);
-        return r.data;
-    }
 };

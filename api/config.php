@@ -1,31 +1,43 @@
 <?php
+// ============================================================
+// MakanApa — Environment-Adaptive Configuration
+// ============================================================
 
-define('DB_HOST', 'sql102.infinityfree.com');
+// ── Auto-detect environment ──────────────────────────────────
+// Uses strpos() instead of str_starts_with() for PHP 7.4 compatibility (InfinityFree).
+$_host   = isset($_SERVER['HTTP_HOST'])   ? $_SERVER['HTTP_HOST']   : '';
+$_sname  = isset($_SERVER['SERVER_NAME']) ? $_SERVER['SERVER_NAME'] : '';
+$isLocal = in_array($_sname, ['localhost', '127.0.0.1', '::1'], true)
+        || strpos($_host, 'localhost') === 0
+        || strpos($_host, '127.0.0.1') === 0;
 
-// Standard MySQL port on InfinityFree
-define('DB_PORT', '3306');
+if ($isLocal) {
+    // ── LOCAL (XAMPP / Port 3307) ────────────────────────────
+    define('DB_HOST', '127.0.0.1');
+    define('DB_PORT', '3307');          // Your custom MariaDB port
+    define('DB_NAME', 'PHPmakanapa_local');   // Your local database name
+    define('DB_USER', 'root');
+    define('DB_PASS', '');              // Default XAMPP has no password
 
-// Your InfinityFree database name
-define('DB_NAME', 'if0_41704967_makanapa');
+    define('APP_URL',    'http://localhost/makanapaPHP2');
+    define('UPLOAD_DIR', __DIR__ . '/../uploads/');
+    define('UPLOAD_URL', APP_URL . '/uploads/');
+} else {
+    // ── PRODUCTION (InfinityFree) ────────────────────────────
+    define('DB_HOST', 'sql102.infinityfree.com');
+    define('DB_PORT', '3306');
+    define('DB_NAME', 'if0_41704967_makanapa');
+    define('DB_USER', 'if0_41704967');
+    define('DB_PASS', 'qZ3wa91umH1T');  // ← change if rotated
 
-// Your InfinityFree database username.
-define('DB_USER', 'if0_41704967');
+    define('APP_URL',    'https://makanapa.is-great.net');
+    define('UPLOAD_DIR', __DIR__ . '/../uploads/');
+    define('UPLOAD_URL', APP_URL . '/uploads/');
+}
 
-// The password you set when creating the database
-define('DB_PASS', 'qZ3wa91umH1T');
-
-// Your InfinityFree subdomain or custom domain (no trailing slash)
-// Example: https://makanapa.infinityfreeapp.com
-define('APP_URL', 'https://makanapa.is-great.net');
-
-// Absolute server path to the uploads folder
-define('UPLOAD_DIR', __DIR__ . '/../uploads/');
-
-// Public URL prefix for uploaded files
-define('UPLOAD_URL', APP_URL . '/uploads/');
-
-// Max upload size in bytes (5 MB default — InfinityFree allows up to 10 MB per file)
-define('MAX_UPLOAD_BYTES', 5 * 1024 * 1024);
-
-// Allowed MIME types for offer media
-define('ALLOWED_MIME', ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'video/mp4', 'video/webm']);
+// ── Shared constants ─────────────────────────────────────────
+define('MAX_UPLOAD_BYTES', 5 * 1024 * 1024);   // 5 MB
+define('ALLOWED_MIME', [
+    'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+    'video/mp4',  'video/webm'
+]);
