@@ -17,10 +17,12 @@ if ($method === 'GET') {
     $requestId = (int) ($_GET['request_id'] ?? 0);
     if ($requestId <= 0) fail('Missing request_id.');
 
-    // Join with users to pull seller average_rating
+    // Join with users to pull seller average_rating AND seller coords for client-side fallback
     $stmt = $db->prepare(
         'SELECT o.*,
-                COALESCE(u.average_rating, 0) AS seller_rating
+                COALESCE(u.average_rating, 0) AS seller_rating,
+                u.latitude  AS seller_lat,
+                u.longitude AS seller_lng
          FROM   offers o
          LEFT JOIN users u ON u.id = o.seller_id
          WHERE  o.request_id = ?

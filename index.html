@@ -29,7 +29,26 @@
             <input type="text" id="auth-name" placeholder="Your Full Name"
                 class="w-full p-3 border-2 border-orange-100 rounded-2xl mb-3 outline-none focus:border-orange-400 text-sm transition-all">
             <input type="number" id="auth-phone" placeholder="Phone: 0812345678"
-                class="w-full p-3 border-2 border-orange-100 rounded-2xl mb-6 outline-none focus:border-orange-400 text-sm transition-all">
+                class="w-full p-3 border-2 border-orange-100 rounded-2xl mb-4 outline-none focus:border-orange-400 text-sm transition-all">
+
+            <!-- Buyer Location -->
+            <div class="mb-5 text-left">
+                <label class="text-xs font-bold text-gray-500 uppercase tracking-wide block mb-2">Your Location</label>
+                <div id="buyer-config-map" style="height:180px;border-radius:16px;overflow:hidden;border:2px solid rgba(255,122,0,0.25);margin-bottom:8px;"></div>
+                <div class="flex gap-2 mb-1">
+                    <button type="button" onclick="buyerMapLocateMe()"
+                        class="flex-1 flex items-center justify-center gap-1 py-2 rounded-xl border-2 border-orange-200 text-orange-600 font-semibold text-xs hover:bg-orange-50 transition-all active:scale-95">
+                        <i class="fa-solid fa-location-crosshairs"></i> My Location
+                    </button>
+                    <span id="buyer-loc-label" class="flex-1 flex items-center justify-center text-[11px] text-gray-500 text-center px-1"></span>
+                </div>
+                <input type="text" id="buyer-address-input"
+                    placeholder="Or type your area / address…"
+                    class="w-full p-2.5 border-2 border-orange-100 rounded-2xl outline-none focus:border-orange-400 text-sm transition-all"
+                    oninput="geocodeBuyerAddress(this.value)">
+                <p class="text-[10px] text-gray-400 mt-1">Drag the pin to set exact location · helps sellers show distance to you</p>
+            </div>
+
             <button onclick="saveConfig()"
                 class="w-full text-white font-bold py-3 rounded-2xl transition-all active:scale-95 shadow-lg"
                 style="background:linear-gradient(135deg,#FF7A00,#FF9A3C); box-shadow:0 8px 20px rgba(255,122,0,0.4);">
@@ -81,10 +100,7 @@
                 </div>
             </div>
 
-            <!-- Habit strip -->
-            <div id="habit-box" class="mt-3 hidden">
-                <div class="flex gap-2 flex-wrap" id="habit-tags"></div>
-            </div>
+
         </header>
 
         <!-- CHAT AREA -->

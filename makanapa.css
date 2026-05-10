@@ -226,9 +226,9 @@ body {
     border-radius: var(--radius-card) var(--radius-card) 0 0;
 }
 
-/* history modal */
+/* history modal — JS controls display via style.display + classList */
 #history-modal { display: none; }
-#history-modal.active { display: flex; }
+#history-modal.flex { display: flex; }
 #history-modal > div { height: 85vh; border-radius: var(--radius-card); }
 #history-list {
     overflow-y: auto;

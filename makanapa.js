@@ -124,9 +124,207 @@ function openConfig() {
     const phoneEl = document.getElementById('auth-phone');
     if (nameEl)  nameEl.value  = savedName  || '';
     if (phoneEl) phoneEl.value = savedPhone || '';
+
+    // Restore location label if coords already saved
+    const latKey = isSellerPage ? 'seller_lat' : 'buyer_lat';
+    const lngKey = isSellerPage ? 'seller_lng' : 'buyer_lng';
+    const savedLat = localStorage.getItem(latKey);
+    const savedLng = localStorage.getItem(lngKey);
+    if (savedLat && savedLng) {
+        const coordText = `✅ Location set (${parseFloat(savedLat).toFixed(4)}, ${parseFloat(savedLng).toFixed(4)})`;
+        const sellerLabel = document.getElementById('seller-loc-label');
+        const buyerLabel  = document.getElementById('buyer-loc-label');
+        if (sellerLabel) sellerLabel.textContent = coordText;
+        if (buyerLabel)  buyerLabel.textContent  = coordText;
+    }
     modal.classList.remove('hidden');
     modal.classList.add('flex');
+
+    // Init the correct map after the modal is visible
+    setTimeout(() => {
+        if (isSellerPage) initSellerConfigMap();
+        else              initBuyerConfigMap();
+    }, 100);
 }
+
+// ── CONFIG MAP PICKERS ────────────────────────────────────────
+// Separate map instances for seller and buyer config modals
+let _sellerConfigMap = null, _sellerConfigMarker = null;
+let _buyerConfigMap  = null, _buyerConfigMarker  = null;
+
+// Role-specific localStorage keys so seller and buyer coords never collide
+const LAT_KEY = isSellerPage ? 'seller_lat' : 'buyer_lat';
+const LNG_KEY = isSellerPage ? 'seller_lng' : 'buyer_lng';
+
+function _initConfigMap(mapId, markerColor, latKey, lngKey, onMove) {
+    if (!window.L) return null;
+    const el = document.getElementById(mapId);
+    if (!el) return null;
+
+    const savedLat = parseFloat(localStorage.getItem(latKey) || '') || -6.2088;
+    const savedLng = parseFloat(localStorage.getItem(lngKey) || '') || 106.8456;
+
+    const map = L.map(mapId, { zoomControl: true }).setView([savedLat, savedLng], 15);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap', maxZoom: 19
+    }).addTo(map);
+
+    const icon = L.divIcon({
+        html: `<div style="font-size:28px;line-height:1;">${markerColor === 'teal' ? '🏪' : '📍'}</div>`,
+        iconAnchor: [14, 28], className: ''
+    });
+    const marker = L.marker([savedLat, savedLng], { draggable: true, icon }).addTo(map);
+
+    const updateCoords = async (lat, lng) => {
+        localStorage.setItem(latKey, lat);
+        localStorage.setItem(lngKey, lng);
+        try {
+            const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`);
+            const d   = await res.json();
+            const short = d.address?.suburb || d.address?.city_district || d.address?.city || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+            onMove(short, d.display_name || short);
+        } catch (_) { onMove(`${lat.toFixed(4)}, ${lng.toFixed(4)}`, ''); }
+    };
+
+    marker.on('dragend', e => {
+        const { lat, lng } = e.target.getLatLng();
+        updateCoords(lat, lng);
+    });
+    map.on('click', e => {
+        marker.setLatLng(e.latlng);
+        updateCoords(e.latlng.lat, e.latlng.lng);
+    });
+
+    // Show label for already-saved coords on open (don't overwrite address input)
+    if (!isNaN(parseFloat(localStorage.getItem(latKey)))) {
+        fetch(`https://nominatim.openstreetmap.org/reverse?lat=${savedLat}&lon=${savedLng}&format=json`)
+            .then(r => r.json()).then(d => {
+                const short = d.address?.suburb || d.address?.city_district || d.address?.city || `${savedLat.toFixed(4)}, ${savedLng.toFixed(4)}`;
+                onMove(short, null); // null = don't update address input on init
+            }).catch(() => {});
+    }
+
+    setTimeout(() => map.invalidateSize(), 350);
+    return { map, marker };
+}
+
+// Called when seller config modal opens
+function initSellerConfigMap() {
+    if (_sellerConfigMap) { setTimeout(() => _sellerConfigMap.invalidateSize(), 350); return; }
+    const inst = _initConfigMap('seller-config-map', 'teal', 'seller_lat', 'seller_lng', (short, full) => {
+        const lbl = document.getElementById('seller-loc-label');
+        if (lbl) lbl.textContent = `✅ ${short}`;
+        if (full !== null) {
+            const inp = document.getElementById('seller-address-input');
+            if (inp) inp.value = full;
+        }
+    });
+    if (inst) { _sellerConfigMap = inst.map; _sellerConfigMarker = inst.marker; }
+}
+
+// Called when buyer config modal opens
+function initBuyerConfigMap() {
+    if (_buyerConfigMap) { setTimeout(() => _buyerConfigMap.invalidateSize(), 350); return; }
+    const inst = _initConfigMap('buyer-config-map', 'orange', 'buyer_lat', 'buyer_lng', (short, full) => {
+        const lbl = document.getElementById('buyer-loc-label');
+        if (lbl) lbl.textContent = `✅ ${short}`;
+        if (full !== null) {
+            const inp = document.getElementById('buyer-address-input');
+            if (inp) inp.value = full;
+        }
+    });
+    if (inst) { _buyerConfigMap = inst.map; _buyerConfigMarker = inst.marker; }
+}
+
+// "My Location" buttons
+window.sellerMapLocateMe = function() {
+    if (!navigator.geolocation) return showToast('Geolocation not supported', '', 'error');
+    navigator.geolocation.getCurrentPosition(pos => {
+        const { latitude: lat, longitude: lng } = pos.coords;
+        localStorage.setItem('seller_lat', lat);
+        localStorage.setItem('seller_lng', lng);
+        if (_sellerConfigMap && _sellerConfigMarker) {
+            _sellerConfigMap.setView([lat, lng], 16);
+            _sellerConfigMarker.setLatLng([lat, lng]);
+        }
+        fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`)
+            .then(r => r.json()).then(d => {
+                const short = d.address?.suburb || d.address?.city_district || d.address?.city || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+                const lbl = document.getElementById('seller-loc-label');
+                if (lbl) lbl.textContent = `✅ ${short}`;
+                const inp = document.getElementById('seller-address-input');
+                if (inp) inp.value = d.display_name || short;
+            }).catch(() => {});
+    }, () => showToast('Permission denied', 'Enable location access.', 'error'));
+};
+
+window.buyerMapLocateMe = function() {
+    if (!navigator.geolocation) return showToast('Geolocation not supported', '', 'error');
+    navigator.geolocation.getCurrentPosition(pos => {
+        const { latitude: lat, longitude: lng } = pos.coords;
+        localStorage.setItem('buyer_lat', lat);
+        localStorage.setItem('buyer_lng', lng);
+        if (_buyerConfigMap && _buyerConfigMarker) {
+            _buyerConfigMap.setView([lat, lng], 16);
+            _buyerConfigMarker.setLatLng([lat, lng]);
+        }
+        fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`)
+            .then(r => r.json()).then(d => {
+                const short = d.address?.suburb || d.address?.city_district || d.address?.city || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+                const lbl = document.getElementById('buyer-loc-label');
+                if (lbl) lbl.textContent = `✅ ${short}`;
+                const inp = document.getElementById('buyer-address-input');
+                if (inp) inp.value = d.display_name || short;
+            }).catch(() => {});
+    }, () => showToast('Permission denied', 'Enable location access.', 'error'));
+};
+
+// Debounced geocode for manual address inputs
+let _sellerGeoTimer = null;
+window.geocodeSellerAddress = function(val) {
+    clearTimeout(_sellerGeoTimer);
+    if (!val || val.length < 5) return;
+    _sellerGeoTimer = setTimeout(async () => {
+        try {
+            const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(val)}&format=json&limit=1`);
+            const d   = await res.json();
+            if (d && d[0]) {
+                const lat = parseFloat(d[0].lat), lng = parseFloat(d[0].lon);
+                localStorage.setItem('seller_lat', lat);
+                localStorage.setItem('seller_lng', lng);
+                if (_sellerConfigMap && _sellerConfigMarker) {
+                    _sellerConfigMap.setView([lat, lng], 15);
+                    _sellerConfigMarker.setLatLng([lat, lng]);
+                }
+                const lbl = document.getElementById('seller-loc-label');
+                if (lbl) lbl.textContent = `✅ ${d[0].display_name.split(',')[0]}`;
+            }
+        } catch (_) {}
+    }, 900);
+};
+
+let _buyerGeoTimer = null;
+window.geocodeBuyerAddress = function(val) {
+    clearTimeout(_buyerGeoTimer);
+    if (!val || val.length < 5) return;
+    _buyerGeoTimer = setTimeout(async () => {
+        try {
+            const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(val)}&format=json&limit=1`);
+            const d   = await res.json();
+            if (d && d[0]) {
+                const lat = parseFloat(d[0].lat), lng = parseFloat(d[0].lon);
+                localStorage.setItem('buyer_lat', lat);
+                localStorage.setItem('buyer_lng', lng);
+                if (_buyerConfigMap && _buyerConfigMarker) {
+                    _buyerConfigMap.setView([lat, lng], 15);
+                    _buyerConfigMarker.setLatLng([lat, lng]);
+                }
+                const lbl = document.getElementById('buyer-loc-label');
+                if (lbl) lbl.textContent = `✅ ${d[0].display_name.split(',')[0]}`;
+            }
+        } catch (_) {}
+    }, 900);
+};
 
 async function saveConfig() {
     const nameEl  = document.getElementById('auth-name');
@@ -167,9 +365,9 @@ async function fetchUserProfile() {
     const name  = isSellerPage ? localStorage.getItem('seller_name')  : localStorage.getItem('buyer_name');
     if (!phone) return;
     try {
-        // Pass saved seller/buyer coordinates so the DB row stays fresh
-        const savedLat = parseFloat(localStorage.getItem('user_lat') || '');
-        const savedLng = parseFloat(localStorage.getItem('user_lng') || '');
+        // Pass saved coordinates so the DB row stays fresh
+        const savedLat = parseFloat(localStorage.getItem(LAT_KEY) || '');
+        const savedLng = parseFloat(localStorage.getItem(LNG_KEY) || '');
         const coords   = (!isNaN(savedLat) && !isNaN(savedLng))
             ? { lat: savedLat, lng: savedLng, address: localStorage.getItem('user_address') || '' }
             : null;
@@ -221,54 +419,7 @@ async function submitTopup() {
 function openTopupModal()  { const m = document.getElementById('topup-modal');  if (m) { m.classList.remove('hidden'); m.classList.add('flex'); } }
 function closeTopupModal() { const m = document.getElementById('topup-modal');  if (m) { m.classList.add('hidden'); m.classList.remove('flex'); } }
 
-// ── HABITS ───────────────────────────────────────────────────
-async function loadUserHabit() {
-    if (!currentDbUser) return;
-    try {
-        const habits = await API.getHabits(currentDbUser.id);
-        if (habits) {
-            const container = document.getElementById('habit-summary');
-            if (container) {
-                container.innerHTML = `
-                    <div class="text-orange-500 font-bold mb-2">YOUR HABITS</div>
-                    <div class="flex gap-2 flex-wrap">
-                        <span class="px-3 py-1 bg-orange-100 text-orange-700 rounded-full text-sm">💰 ~Rp ${Math.round(habits.avg_price || 0).toLocaleString()}</span>
-                        <span class="px-3 py-1 bg-orange-100 text-orange-700 rounded-full text-sm">🍽 ${habits.last_food || '?'}</span>
-                    </div>`;
-            }
-        }
-    } catch (e) { console.error('loadUserHabit:', e.message); }
-}
 
-async function renderHabits() {
-    if (!currentDbUser) return;
-    try {
-        const habits = await API.getHabits(currentDbUser.id);
-        const box  = document.getElementById('habit-box');
-        const tags = document.getElementById('habit-tags');
-        if (!habits || (!habits.avg_price && !habits.last_food)) {
-            box?.classList.add('hidden'); return;
-        }
-        box?.classList.remove('hidden');
-        if (tags) {
-            tags.innerHTML = '';
-            if (habits.avg_price) tags.innerHTML += `<span class="bg-orange-500 text-white text-sm px-3 py-1 rounded-full font-bold">💰 ~Rp ${Number(habits.avg_price).toLocaleString()}</span>`;
-            if (habits.last_food) tags.innerHTML += `<span class="bg-white border border-orange-300 text-orange-700 text-sm px-3 py-1 rounded-full font-semibold">🍜 ${habits.last_food}</span>`;
-        }
-    } catch (e) { console.error('renderHabits:', e.message); }
-}
-
-async function saveUserHabit(food, price, isCheapest) {
-    if (!currentDbUser) return;
-    try {
-        const habit = await API.getHabits(currentDbUser.id);
-        const newTotal    = (habit?.total_orders   || 0) + 1;
-        const newCheapest = (habit?.cheapest_count || 0) + (isCheapest ? 1 : 0);
-        const prevAvg     = habit?.avg_price || price;
-        const newAvg      = Math.round(((prevAvg * (newTotal - 1)) + price) / newTotal);
-        await API.saveHabits(currentDbUser.id, food, newAvg, newTotal, newCheapest);
-    } catch (err) { console.error('saveUserHabit:', err); }
-}
 
 // ── CHAT HELPERS ─────────────────────────────────────────────
 function addMessage(text, sender) {
@@ -351,22 +502,29 @@ async function sendRequest(text) {
     addMessage('Requesting your order. Waiting for sellers... ⏳', 'bot');
     auctionContainer = null;
 
-    // Capture buyer GPS so sellers can calculate distance
+    // Use buyer's saved location from profile — fall back to live GPS
     let coords = null;
-    try {
-        coords = await new Promise((resolve, reject) => {
-            if (!navigator.geolocation) return resolve(null);
-            navigator.geolocation.getCurrentPosition(
-                pos => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-                ()  => resolve(null),
-                { timeout: 5000 }
-            );
-        });
-        if (coords) {
-            localStorage.setItem('user_lat', coords.lat);
-            localStorage.setItem('user_lng', coords.lng);
-        }
-    } catch (_) {}
+    const savedLat = parseFloat(localStorage.getItem('buyer_lat') || '');
+    const savedLng = parseFloat(localStorage.getItem('buyer_lng') || '');
+    if (!isNaN(savedLat) && !isNaN(savedLng)) {
+        coords = { lat: savedLat, lng: savedLng };
+    } else {
+        // Try live GPS as fallback
+        try {
+            coords = await new Promise(resolve => {
+                if (!navigator.geolocation) return resolve(null);
+                navigator.geolocation.getCurrentPosition(
+                    pos => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+                    ()  => resolve(null),
+                    { timeout: 5000 }
+                );
+            });
+            if (coords) {
+                localStorage.setItem('buyer_lat', coords.lat);
+                localStorage.setItem('buyer_lng', coords.lng);
+            }
+        } catch (_) {}
+    }
 
     try {
         const req = await API.createRequest(
@@ -430,10 +588,23 @@ function renderAuction(offers) {
         const isCheapest = price === minPrice;
         const isBestVal  = offer.valueScore === maxScore && maxScore > 0;
 
-        // ── Distance badge ──
-        const distKm = offer.distance_km !== null && offer.distance_km !== undefined
-            ? parseFloat(offer.distance_km).toFixed(1)
-            : null;
+        // ── Distance badge — use DB value or calculate client-side fallback ──
+        let distKm = null;
+        if (offer.distance_km !== null && offer.distance_km !== undefined && offer.distance_km !== '0.00') {
+            distKm = parseFloat(offer.distance_km).toFixed(1);
+        } else if (offer.seller_lat && offer.seller_lng) {
+            // Fallback: calculate using buyer's saved location vs seller's user coords
+            const buyerLat = parseFloat(localStorage.getItem('buyer_lat') || '');
+            const buyerLng = parseFloat(localStorage.getItem('buyer_lng') || '');
+            if (!isNaN(buyerLat) && !isNaN(buyerLng)) {
+                const R = 6371;
+                const dLat = (parseFloat(offer.seller_lat) - buyerLat) * Math.PI / 180;
+                const dLng = (parseFloat(offer.seller_lng) - buyerLng) * Math.PI / 180;
+                const a = Math.sin(dLat/2)**2 + Math.cos(buyerLat*Math.PI/180) * Math.cos(parseFloat(offer.seller_lat)*Math.PI/180) * Math.sin(dLng/2)**2;
+                const km = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+                distKm = km.toFixed(1);
+            }
+        }
         const distHTML = distKm !== null
             ? `<span class="inline-flex items-center gap-1 text-[10px] font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">📍 ${distKm} km away</span>`
             : '';
@@ -607,7 +778,6 @@ async function submitOrder() {
         });
         currentDbUser.balance = result.new_balance;
         loadBalance();
-        saveUserHabit(food, price, false);
         closeModal();
         showToast('Order is live! 🎉', `${food} ×${qty} from ${seller} — Rp ${total.toLocaleString('id-ID')}. Hang tight!`, 'buyer', 7000);
         localStorage.setItem('buyer_address', address);
@@ -766,8 +936,8 @@ async function submitOffer(reqId) {
     if (sellerId) fd.append('seller_id', sellerId);
 
     // Send seller GPS so PHP can run Haversine
-    const sellerLat = parseFloat(localStorage.getItem('user_lat') || '');
-    const sellerLng = parseFloat(localStorage.getItem('user_lng') || '');
+    const sellerLat = parseFloat(localStorage.getItem('seller_lat') || '');
+    const sellerLng = parseFloat(localStorage.getItem('seller_lng') || '');
     if (!isNaN(sellerLat) && !isNaN(sellerLng)) {
         fd.append('seller_lat', sellerLat);
         fd.append('seller_lng', sellerLng);
@@ -1124,6 +1294,7 @@ async function loadSellerHistory() {
         const orders    = await API.getOrdersBySeller(sellerName);
         const today     = new Date().toDateString();
         let todayEarnings = 0;
+        let totalEarnings = 0;
 
         const active    = (orders || []).filter(o => o.status !== 'completed' && o.status !== 'delivered' && o.status !== 'cancelled');
         const completed = (orders || []).filter(o => o.status === 'completed' || o.status === 'delivered');
@@ -1139,7 +1310,8 @@ async function loadSellerHistory() {
         }
 
         active.forEach(o => {
-            if (new Date(o.created_at).toDateString() === today) todayEarnings += (o.total || 0);
+            const orderDate = new Date((o.created_at || '').replace(' ', 'T')).toDateString();
+            if (orderDate === today) todayEarnings += (o.total || 0);
             const el = document.createElement('div');
             el.className = 'p-4 rounded-2xl border-2 border-teal-100 bg-teal-50/40 shadow-sm mb-3';
             const notesLine = o.notes ? `<div class="text-[11px] text-yellow-700 mt-0.5">📝 ${o.notes}</div>` : '';
@@ -1184,7 +1356,10 @@ async function loadSellerHistory() {
             listEl.appendChild(d);
         }
         completed.forEach(o => {
-            if (new Date(o.created_at).toDateString() === today) todayEarnings += (o.total || 0);
+            // Fix: parse the date robustly — replace space with T for ISO format
+            const orderDate = new Date((o.created_at || '').replace(' ', 'T')).toDateString();
+            if (orderDate === today) todayEarnings += (o.total || 0);
+            totalEarnings += (o.total || 0);
             const el = document.createElement('div');
             el.className = 'p-3 rounded-2xl border border-gray-100 bg-white shadow-sm mb-2 opacity-70';
             el.innerHTML = `
@@ -1230,6 +1405,10 @@ async function loadSellerHistory() {
 
         const totalEl = document.getElementById('seller-today-total');
         if (totalEl) totalEl.innerText = `Rp ${todayEarnings.toLocaleString('id-ID')}`;
+
+        // Also show all-time total if there are completed orders
+        const allTimeEl = document.getElementById('seller-alltime-total');
+        if (allTimeEl) allTimeEl.innerText = `Rp ${totalEarnings.toLocaleString('id-ID')}`;
     } catch (e) {
         listEl.innerHTML = '<div class="text-center text-red-400 mt-4">Couldn\'t load orders. Try again?</div>';
     }
@@ -1427,12 +1606,10 @@ window.handlePhysicalMenuUpload = async function(event) {
 // Called once on seller page load to store shop coordinates.
 function captureSellerLocation() {
     if (!isSellerPage || !navigator.geolocation) return;
-    // Only capture if we don't already have coords
-    if (localStorage.getItem('user_lat')) return;
+    // Always refresh seller coords on page load
     navigator.geolocation.getCurrentPosition(pos => {
-        localStorage.setItem('user_lat', pos.coords.latitude);
-        localStorage.setItem('user_lng', pos.coords.longitude);
-        // Persist to DB so it survives sessions
+        localStorage.setItem('seller_lat', pos.coords.latitude);
+        localStorage.setItem('seller_lng', pos.coords.longitude);
         if (currentDbUser) {
             API.upsertUser(
                 localStorage.getItem('seller_phone'),

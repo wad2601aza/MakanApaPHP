@@ -8,6 +8,7 @@
     <meta name="description" content="Manage your food offers and receive orders in real-time.">
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="makanapa.css">
 </head>
 
@@ -27,7 +28,27 @@
             <input type="text" id="auth-name" placeholder="Shop Name (e.g. Warung Budi)"
                 class="w-full p-3 border-2 border-teal-100 rounded-2xl mb-3 outline-none focus:border-teal-400 text-sm transition-all">
             <input type="number" id="auth-phone" placeholder="WhatsApp: 0812345678"
-                class="w-full p-3 border-2 border-teal-100 rounded-2xl mb-6 outline-none focus:border-teal-400 text-sm transition-all">
+                class="w-full p-3 border-2 border-teal-100 rounded-2xl mb-4 outline-none focus:border-teal-400 text-sm transition-all">
+
+            <!-- Shop Location -->
+            <div class="mb-5 text-left">
+                <label class="text-xs font-bold text-gray-500 uppercase tracking-wide block mb-2">Shop Location</label>
+                <!-- Map -->
+                <div id="seller-config-map" style="height:180px;border-radius:16px;overflow:hidden;border:2px solid rgba(13,148,136,0.25);margin-bottom:8px;"></div>
+                <div class="flex gap-2 mb-1">
+                    <button type="button" onclick="sellerMapLocateMe()"
+                        class="flex-1 flex items-center justify-center gap-1 py-2 rounded-xl border-2 border-teal-200 text-teal-700 font-semibold text-xs hover:bg-teal-50 transition-all active:scale-95">
+                        <i class="fa-solid fa-location-crosshairs"></i> My Location
+                    </button>
+                    <span id="seller-loc-label" class="flex-1 flex items-center justify-center text-[11px] text-gray-500 text-center px-1"></span>
+                </div>
+                <input type="text" id="seller-address-input"
+                    placeholder="Or type your shop address…"
+                    class="w-full p-2.5 border-2 border-teal-100 rounded-2xl outline-none focus:border-teal-400 text-sm transition-all"
+                    oninput="geocodeSellerAddress(this.value)">
+                <p class="text-[10px] text-gray-400 mt-1">Drag the pin to set exact location · used for distance calculation</p>
+            </div>
+
             <button onclick="saveConfig()"
                 class="w-full text-white font-bold py-3 rounded-2xl transition-all active:scale-95 shadow-lg"
                 style="background:linear-gradient(135deg,#0D9488,#14B8A6); box-shadow:0 8px 20px rgba(13,148,136,0.4);">
@@ -107,7 +128,8 @@
                 <div>
                     <div class="font-bold text-xl">Sales Dashboard</div>
                     <div class="text-sm text-gray-400 mt-0.5">
-                        Today: <span id="seller-today-total" class="font-bold text-teal-600">Rp 0</span>
+                        <span class="mx-1 text-gray-300">·</span>
+                        Total: <span id="seller-alltime-total" class="font-bold text-teal-600">Rp 0</span>
                     </div>
                 </div>
                 <button onclick="closeSellerHistory()"
@@ -154,6 +176,7 @@
 
     <!-- ── SCRIPTS ── -->
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="makanapa_api.js?v=3"></script>
     <script src="makanapa.js?v=3"></script>
 </body>
