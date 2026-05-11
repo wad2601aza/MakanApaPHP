@@ -73,6 +73,13 @@
                 </div>
 
                 <div class="flex items-center gap-3">
+                    <!-- Seller balance chip — updates when delivery is marked complete -->
+                    <div onclick="openSellerHistory()"
+                        class="bg-white/20 backdrop-blur px-3 py-2 rounded-2xl cursor-pointer hover:bg-white/30 transition-all select-none">
+                        <div class="text-[10px] text-white/60 font-semibold uppercase tracking-wide leading-none">Balance</div>
+                        <div class="font-bold text-sm mt-0.5">Rp <span id="user-balance">0</span></div>
+                    </div>
+
                     <!-- New Order Badge: persistent counter, click to open dashboard -->
                     <button id="new-order-badge" onclick="openSellerHistory()"
                         class="new-order-badge hidden">

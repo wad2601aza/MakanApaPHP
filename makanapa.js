@@ -1409,6 +1409,15 @@ async function loadSellerHistory() {
         // Also show all-time total if there are completed orders
         const allTimeEl = document.getElementById('seller-alltime-total');
         if (allTimeEl) allTimeEl.innerText = `Rp ${totalEarnings.toLocaleString('id-ID')}`;
+
+        // Sync seller balance from DB to keep header chip accurate
+        if (currentDbUser) {
+            const fresh = await API.getUser(localStorage.getItem('seller_phone') || '');
+            if (fresh && fresh.balance !== undefined) {
+                currentDbUser.balance = fresh.balance;
+                loadBalance();
+            }
+        }
     } catch (e) {
         listEl.innerHTML = '<div class="text-center text-red-400 mt-4">Couldn\'t load orders. Try again?</div>';
     }
@@ -1416,7 +1425,7 @@ async function loadSellerHistory() {
 
 async function updateOrderStatus(orderId, newStatus) {
     try {
-        await API.updateOrderStatus(orderId, newStatus);
+        const result = await API.updateOrderStatus(orderId, newStatus);
         const msgs = {
             'on process': ['Cooking time! 🍳', "Order marked as On Process."],
             'completed':  ['Completed! 🚀',    'Order marked as completed.'],
@@ -1424,6 +1433,14 @@ async function updateOrderStatus(orderId, newStatus) {
         };
         const [title, msg] = msgs[newStatus] || ['Updated!', `Status: ${newStatus}`];
         showToast(title, msg, 'success', 5000);
+
+        // If the API returned a new seller balance, update UI immediately
+        const newBal = result?.data?.seller_new_balance ?? result?.seller_new_balance ?? null;
+        if (newBal !== null && currentDbUser) {
+            currentDbUser.balance = newBal;
+            loadBalance();
+        }
+
         loadSellerHistory();
     } catch (err) {
         showToast('Update failed 😕', err.message, 'error');
@@ -1544,53 +1561,79 @@ window.handlePhysicalMenuUpload = async function(event) {
         });
         if (statusEl) statusEl.innerText = 'Parsing results...';
 
-        
-        const lines = result.data.text.split(/\r?\n/);
+        // ── Multi-column aware parser ─────────────────────────
+        // Tesseract reads two-column menus left-to-right, producing lines like:
+        //   "Jus Alpukat 15K Roti Maryam 15K"
+        // Strategy: split each OCR line into segments at every price boundary
+        // (number + optional K), then parse each segment as one menu item.
+
+        const rawLines = result.data.text.split(/\r?\n/);
         let addedCount = 0;
 
-        // Matches: <name> <whitespace> <number> <optional K/k>
-        // The name must be at least 3 chars; number must appear at end of line.
-        const lineRe = /^([A-Za-z][A-Za-z0-9\s\-\&\/]{2,}?)\s{1,}(\d[\d.,]*)\s*([kK]?)\s*$/;
+        // Matches a single "Food Name  15K" or "Food Name  15000" segment
+        // Anchored to start of string so we can apply it after splitting
+        const itemRe = /^([A-Za-z][A-Za-z0-9\s\-\&\/]{1,}?)\s+(\d[\d.,]*)\s*([kK]?)$/;
 
-        for (const rawLine of lines) {
-            // Strip common OCR noise: Rp, currency symbols, leading/trailing junk
-            const line = rawLine
+        // Split a line into individual "Name Price" segments.
+        // e.g. "Jus Alpukat 15K Roti Maryam 15K" → ["Jus Alpukat 15K", "Roti Maryam 15K"]
+        function splitIntoSegments(line) {
+            // Find every position where a price token ends: digits + optional K
+            // We split AFTER each price token, keeping the token with the preceding name.
+            const segments = [];
+            // Regex: capture everything up to and including a price token
+            const segRe = /([A-Za-z][A-Za-z0-9\s\-\&\/]*?\s+\d[\d.,]*\s*[kK]?)/g;
+            let match;
+            while ((match = segRe.exec(line)) !== null) {
+                segments.push(match[1].trim());
+            }
+            // If no segments found, return the whole line as-is
+            return segments.length > 0 ? segments : [line];
+        }
+
+        for (const rawLine of rawLines) {
+            // Strip OCR noise
+            const cleaned = rawLine
                 .replace(/Rp\.?\s*/gi, '')
                 .replace(/[|\\]/g, '')
                 .trim();
 
-            if (!line) continue;
+            if (!cleaned) continue;
 
-            const m = lineRe.exec(line);
-            if (!m) continue;
+            // Skip obvious section headers (single word, no digits)
+            if (!/\d/.test(cleaned)) continue;
 
-            let name  = m[1].trim();
-            let price = parseInt(m[2].replace(/[.,]/g, ''));
-            const hasK = m[3].toLowerCase() === 'k';
+            const segments = splitIntoSegments(cleaned);
 
-            if (!name || isNaN(price)) continue;
+            for (const seg of segments) {
+                const m = itemRe.exec(seg.trim());
+                if (!m) continue;
 
-            // Multiply by 1000 if K suffix or if number looks like shorthand (≤ 999)
-            if (hasK) {
-                price *= 1000;
-            } else if (price > 0 && price <= 999) {
-                price *= 1000;
+                let name  = m[1].trim();
+                let price = parseInt(m[2].replace(/[.,]/g, ''));
+                const hasK = m[3].toLowerCase() === 'k';
+
+                if (!name || isNaN(price)) continue;
+
+                // Multiply by 1000 if K suffix or shorthand (≤ 999)
+                if (hasK) {
+                    price *= 1000;
+                } else if (price > 0 && price <= 999) {
+                    price *= 1000;
+                }
+
+                // Sanity range: Rp 1.000 – Rp 500.000
+                if (price < 1000 || price > 500000) continue;
+
+                // Skip very short names or all-caps headers (MENU, CAMILAN, etc.)
+                if (name.length < 3) continue;
+                if (/^[A-Z]{3,}$/.test(name)) continue;
+
+                // Clean trailing punctuation
+                name = name.replace(/[\.\:\-\,]+$/, '').trim();
+
+                await API.saveMenuDraft(phone, name, price);
+                addedCount++;
             }
-
-            // Sanity range: Rp 1.000 – Rp 500.000
-            if (price < 1000 || price > 500000) continue;
-
-            // Skip section headers that OCR picks up (e.g. "Makanan", "Minuman")
-            // They have no price so they won't match, but guard against 1-word names
-            // that are clearly headers (all-caps or very short)
-            if (name.length < 3) continue;
-            if (/^[A-Z]{3,}$/.test(name)) continue; // e.g. "MENU", "CAMILAN"
-
-            // Clean trailing punctuation / stray chars from name
-            name = name.replace(/[\.\:\-\,]+$/, '').trim();
-
-            await API.saveMenuDraft(phone, name, price);
-            addedCount++;
         }
 
         showToast('Menu Scanned!', `Added ${addedCount} item(s) from photo.`, 'success');
