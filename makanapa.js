@@ -1562,75 +1562,61 @@ window.handlePhysicalMenuUpload = async function(event) {
         if (statusEl) statusEl.innerText = 'Parsing results...';
 
         // ── Multi-column aware parser ─────────────────────────
-        // Tesseract reads two-column menus left-to-right, producing lines like:
+        // Tesseract reads two-column menus left-to-right, merging both columns:
         //   "Jus Alpukat 15K Roti Maryam 15K"
-        // Strategy: split each OCR line into segments at every price boundary
-        // (number + optional K), then parse each segment as one menu item.
+        // We split each line at every price boundary (number+K) using a lookahead,
+        // then parse each segment independently.
 
         const rawLines = result.data.text.split(/\r?\n/);
         let addedCount = 0;
 
-        // Matches a single "Food Name  15K" or "Food Name  15000" segment
-        // Anchored to start of string so we can apply it after splitting
-        const itemRe = /^([A-Za-z][A-Za-z0-9\s\-\&\/]{1,}?)\s+(\d[\d.,]*)\s*([kK]?)$/;
-
-        // Split a line into individual "Name Price" segments.
-        // e.g. "Jus Alpukat 15K Roti Maryam 15K" → ["Jus Alpukat 15K", "Roti Maryam 15K"]
-        function splitIntoSegments(line) {
-            // Find every position where a price token ends: digits + optional K
-            // We split AFTER each price token, keeping the token with the preceding name.
-            const segments = [];
-            // Regex: capture everything up to and including a price token
-            const segRe = /([A-Za-z][A-Za-z0-9\s\-\&\/]*?\s+\d[\d.,]*\s*[kK]?)/g;
-            let match;
-            while ((match = segRe.exec(line)) !== null) {
-                segments.push(match[1].trim());
-            }
-            // If no segments found, return the whole line as-is
-            return segments.length > 0 ? segments : [line];
-        }
-
-        for (const rawLine of rawLines) {
-            // Strip OCR noise
-            const cleaned = rawLine
-                .replace(/Rp\.?\s*/gi, '')
-                .replace(/[|\\]/g, '')
-                .trim();
-
-            if (!cleaned) continue;
-
-            // Skip obvious section headers (single word, no digits)
-            if (!/\d/.test(cleaned)) continue;
-
-            const segments = splitIntoSegments(cleaned);
-
-            for (const seg of segments) {
-                const m = itemRe.exec(seg.trim());
-                if (!m) continue;
-
-                let name  = m[1].trim();
-                let price = parseInt(m[2].replace(/[.,]/g, ''));
-                const hasK = m[3].toLowerCase() === 'k';
+        // Extract all "Name Price" pairs from a single string (handles 1 or 2 columns).
+        // Strategy: find every occurrence of  <word(s)>  <digits>[K]
+        // using a global regex that matches the shortest possible name before each price.
+        function extractItems(text) {
+            const items = [];
+            // Match: one or more capitalized/mixed words, then whitespace, then price+K
+            // The name part stops as soon as it hits digits — no greedy space-eating.
+            const re = /([A-Za-z][A-Za-z0-9]*(?:\s+[A-Za-z][A-Za-z0-9]*)*)\s+(\d{1,3}(?:[.,]\d{3})*)\s*([kK]?)/g;
+            let m;
+            while ((m = re.exec(text)) !== null) {
+                const name  = m[1].trim();
+                const hasK  = m[3].toLowerCase() === 'k';
+                let price   = parseInt(m[2].replace(/[.,]/g, ''));
 
                 if (!name || isNaN(price)) continue;
+                if (name.length < 3) continue;
+                // Skip all-caps single words (section headers: MENU, CAMILAN, etc.)
+                if (/^[A-Z]{3,}$/.test(name)) continue;
+                // Skip phone numbers / URLs that sneak through
+                if (/^\d|@|www|\.com/i.test(name)) continue;
 
-                // Multiply by 1000 if K suffix or shorthand (≤ 999)
                 if (hasK) {
                     price *= 1000;
                 } else if (price > 0 && price <= 999) {
                     price *= 1000;
                 }
 
-                // Sanity range: Rp 1.000 – Rp 500.000
                 if (price < 1000 || price > 500000) continue;
 
-                // Skip very short names or all-caps headers (MENU, CAMILAN, etc.)
-                if (name.length < 3) continue;
-                if (/^[A-Z]{3,}$/.test(name)) continue;
-
                 // Clean trailing punctuation
-                name = name.replace(/[\.\:\-\,]+$/, '').trim();
+                const cleanName = name.replace(/[\.\:\-\,]+$/, '').trim();
+                items.push({ name: cleanName, price });
+            }
+            return items;
+        }
 
+        for (const rawLine of rawLines) {
+            const cleaned = rawLine
+                .replace(/Rp\.?\s*/gi, '')
+                .replace(/[|\\]/g, '')
+                .trim();
+
+            if (!cleaned) continue;
+            if (!/\d/.test(cleaned)) continue; // no price → skip (headers, etc.)
+
+            const items = extractItems(cleaned);
+            for (const { name, price } of items) {
                 await API.saveMenuDraft(phone, name, price);
                 addedCount++;
             }
