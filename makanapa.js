@@ -1410,11 +1410,25 @@ async function loadSellerHistory() {
         const allTimeEl = document.getElementById('seller-alltime-total');
         if (allTimeEl) allTimeEl.innerText = `Rp ${totalEarnings.toLocaleString('id-ID')}`;
 
-        // Sync seller balance from DB to keep header chip accurate
+        // ── Sync balance chip ─────────────────────────────────
+        // If DB balance is 0 but there are completed orders, the seller was never
+        // credited (orders completed before the credit logic was deployed).
+        // Patch the DB balance once so the chip stays accurate going forward.
         if (currentDbUser) {
             const fresh = await API.getUser(localStorage.getItem('seller_phone') || '');
-            if (fresh && fresh.balance !== undefined) {
-                currentDbUser.balance = fresh.balance;
+            if (fresh) {
+                const dbBalance = parseInt(fresh.balance || 0);
+                if (dbBalance === 0 && totalEarnings > 0) {
+                    // One-time patch: credit the missing earnings
+                    try {
+                        const patched = await API.topup(fresh.id, totalEarnings, fresh.phone);
+                        currentDbUser.balance = patched.new_balance;
+                    } catch (_) {
+                        currentDbUser.balance = totalEarnings; // show correct value even if patch fails
+                    }
+                } else {
+                    currentDbUser.balance = dbBalance;
+                }
                 loadBalance();
             }
         }
