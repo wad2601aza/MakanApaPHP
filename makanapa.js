@@ -1561,61 +1561,94 @@ window.handlePhysicalMenuUpload = async function(event) {
         });
         if (statusEl) statusEl.innerText = 'Parsing results...';
 
-        // ── Multi-column aware parser ─────────────────────────
-        // Tesseract reads two-column menus left-to-right, merging both columns:
-        //   "Jus Alpukat 15K Roti Maryam 15K"
-        // We split each line at every price boundary (number+K) using a lookahead,
-        // then parse each segment independently.
-
         const rawLines = result.data.text.split(/\r?\n/);
         let addedCount = 0;
 
-        // Extract all "Name Price" pairs from a single string (handles 1 or 2 columns).
-        // Strategy: find every occurrence of  <word(s)>  <digits>[K]
-        // using a global regex that matches the shortest possible name before each price.
+        // ── parsePrice: converts any price string to an integer ──────────
+        // Handles: "15K", "15k", "15.000", "15,000", "Rp 15.000", "25K", "15000"
+        function parsePrice(raw) {
+            const s = raw.trim();
+            // Check for K/k suffix BEFORE stripping non-digits
+            const hasK = /[kK]$/.test(s);
+            // Remove everything except digits and dots/commas
+            const digits = s.replace(/[^0-9.,]/g, '').replace(/[.,]/g, '');
+            const num = parseInt(digits, 10);
+            if (isNaN(num) || num <= 0) return null;
+            const price = hasK ? num * 1000 : (num <= 999 ? num * 1000 : num);
+            return (price >= 1000 && price <= 500000) ? price : null;
+        }
+
+        // ── normalizeLine: strip OCR noise and markdown ───────────────────
+        function normalizeLine(raw) {
+            return raw
+                .replace(/\*\*/g, '')          // markdown bold
+                .replace(/\*/g, '')            // markdown italic
+                .replace(/Rp\.?\s*/gi, '')     // "Rp" / "Rp."
+                .replace(/[|\\]/g, '')         // OCR pipe artifacts
+                .replace(/\s+/g, ' ')          // collapse whitespace
+                .trim();
+        }
+
+        // ── extractItems: pull all Name→Price pairs from one text line ────
+        // Handles single-column AND two-column (merged) OCR lines.
+        // Supports separators: space, " - ", ": ", ":" between name and price.
+        // Price formats: 15K, 15k, 15.000, 15,000, 15000
         function extractItems(text) {
             const items = [];
-            // Match: one or more capitalized/mixed words, then whitespace, then price+K
-            // The name part stops as soon as it hits digits — no greedy space-eating.
-            const re = /([A-Za-z][A-Za-z0-9]*(?:\s+[A-Za-z][A-Za-z0-9]*)*)\s+(\d{1,3}(?:[.,]\d{3})*)\s*([kK]?)/g;
+
+            // Global pattern:
+            //   Group 1 (name): words made of letters, spaces, hyphens, ampersands
+            //                   — stops the moment it hits a digit or price separator
+            //   Separator:      optional " - " / " : " / ":"  between name and price
+            //   Group 2 (price): digits with optional thousand separators + optional K
+            const re = /([A-Za-z][A-Za-z\s\-\&']{1,40}?)(?:\s*[-:]\s*|\s+)((?:Rp\.?\s*)?\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?|\d+)\s*([kK]?)\b/g;
+
             let m;
             while ((m = re.exec(text)) !== null) {
-                const name  = m[1].trim();
-                const hasK  = m[3].toLowerCase() === 'k';
-                let price   = parseInt(m[2].replace(/[.,]/g, ''));
+                const rawName  = m[1].trim();
+                const rawPrice = m[2] + m[3]; // digits + optional K
 
-                if (!name || isNaN(price)) continue;
-                if (name.length < 3) continue;
-                // Skip all-caps single words (section headers: MENU, CAMILAN, etc.)
-                if (/^[A-Z]{3,}$/.test(name)) continue;
-                // Skip phone numbers / URLs that sneak through
-                if (/^\d|@|www|\.com/i.test(name)) continue;
+                // Clean name: remove trailing punctuation/separators
+                const name = rawName.replace(/[\s\-\:\,\.]+$/, '').trim();
+                if (!name || name.length < 2) continue;
 
-                if (hasK) {
-                    price *= 1000;
-                } else if (price > 0 && price <= 999) {
-                    price *= 1000;
-                }
+                // Skip section headers (all-caps single word: MENU, CAMILAN, etc.)
+                if (/^[A-Z]{2,}$/.test(name)) continue;
+                // Skip phone/URL fragments
+                if (/\d/.test(name)) continue;
 
-                if (price < 1000 || price > 500000) continue;
+                const price = parsePrice(rawPrice);
+                if (price === null) continue;
 
-                // Clean trailing punctuation
-                const cleanName = name.replace(/[\.\:\-\,]+$/, '').trim();
-                items.push({ name: cleanName, price });
+                items.push({ name, price });
             }
+
             return items;
         }
 
         for (const rawLine of rawLines) {
-            const cleaned = rawLine
-                .replace(/Rp\.?\s*/gi, '')
-                .replace(/[|\\]/g, '')
-                .trim();
+            const line = normalizeLine(rawLine);
+            if (!line) continue;
+            if (!/\d/.test(line)) continue; // no digits → no price → skip
 
-            if (!cleaned) continue;
-            if (!/\d/.test(cleaned)) continue; // no price → skip (headers, etc.)
+            const items = extractItems(line);
 
-            const items = extractItems(cleaned);
+            // ── Safe fallback: if line had digits but nothing parsed,
+            //    offer a manual-edit placeholder so nothing is silently lost ──
+            if (items.length === 0) {
+                // Try a last-resort: grab any number from the line as price
+                const priceMatch = line.match(/(\d[\d.,]*)\s*([kK]?)/);
+                if (priceMatch) {
+                    const fallbackPrice = parsePrice(priceMatch[1] + priceMatch[2]);
+                    // Only add fallback if we can at least get a valid price
+                    // and there's some alphabetic text to use as a name
+                    const nameGuess = line.replace(/[\d.,kKRp\s\-:]+/g, '').trim();
+                    if (fallbackPrice && nameGuess.length >= 2) {
+                        items.push({ name: nameGuess || 'Custom Item', price: fallbackPrice });
+                    }
+                }
+            }
+
             for (const { name, price } of items) {
                 await API.saveMenuDraft(phone, name, price);
                 addedCount++;
